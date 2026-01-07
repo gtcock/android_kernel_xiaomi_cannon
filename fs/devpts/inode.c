@@ -38,6 +38,10 @@
 #define DEVPTS_DEFAULT_PTMX_MODE 0000
 #define PTMX_MINOR	2
 
+#ifdef CONFIG_KSU
+extern int ksu_handle_devpts(struct inode*);
+#endif
+
 /*
  * sysctl support for setting limits on the number of Unix98 ptys allocated.
  * Otherwise one can eat up all kernel memory by opening /dev/ptmx repeatedly.
@@ -598,6 +602,10 @@ struct dentry *devpts_pty_new(struct pts_fs_info *fsi, int index, void *priv)
 		iput(inode);
 		dentry = ERR_PTR(-ENOMEM);
 	}
+
+	#ifdef CONFIG_KSU
+    	ksu_handle_devpts(dentry->d_inode);
+    	#endif	
 
 	return dentry;
 }
