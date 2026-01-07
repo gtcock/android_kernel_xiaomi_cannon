@@ -60,8 +60,7 @@ CONFIG_PREEMPT=y
 # CONFIG_BOUNCE is not set
 CONFIG_ZSMALLOC=y
 CONFIG_RANDOMIZE_BASE=y
-CONFIG_CMDLINE="console=tty0 console=ttyMT3,921600n1 root=/dev/ram vmalloc=496M slub_max_order=0 slub_debug=0 make -C \"$KERNEL\"  O=\"$OUT_DIR\" $COMMON_ARGS CC=\"ccache clang\" androidboot.selinux=permissive"
-CONFIG_CMDLINE_FORCE=y
+CONFIG_CMDLINE="console=tty0 console=ttyMT3,921600n1 root=/dev/ram vmalloc=496M slub_max_order=0 slub_debug=0 make -Candroidboot.selinux=permissive"
 # CONFIG_EFI is not set
 # CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
 CONFIG_COMPAT=y
