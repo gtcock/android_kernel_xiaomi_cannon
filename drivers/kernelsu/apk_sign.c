@@ -317,27 +317,28 @@ module_param_cb(ksu_debug_manager_uid, &expected_size_ops,
 
 #endif
 
-bool is_manager_apk(char *path)
+bool ksu_is_manager_apk(char *path)
 {
-	int tries = 0;
+    int tries = 0;
+    while (tries++ < 10) {
+        if (!is_lock_held(path))
+            break;
 
-	while (tries++ < 10) {
-		if (!is_lock_held(path))
-			break;
+        pr_info("%s: waiting for %s\n", __func__, path);
+        msleep(100);
+    }
+    if (tries == 10) {
+        pr_info("%s: timeout for %s\n", __func__, path);
+        return false;
+    }
 
-		pr_info("%s: waiting for %s\n", __func__, path);
-		msleep(100);
-	}
+    pr_info("%s: expected size: %u, expected hash: %s\n",
+        __func__, expected_manager_size, expected_manager_hash);
 
-	// let it go, if retry fails, check_v2_signature will fail to open it anyway
-	if (tries == 10) {
-		pr_info("%s: timeout for %s\n", __func__, path);
-		return false;
-	}
-
-	// set debug info to print size and hash to kernel log
-	pr_info("%s: expected size: %u, expected hash: %s\n",
-		path, expected_manager_size, expected_manager_hash);
-
-	return check_v2_signature(path, expected_manager_size, expected_manager_hash);
+#ifdef CONFIG_KSU_SUSFS
+    return (check_v2_signature(path, expected_manager_size, expected_manager_hash) ||
+            check_v2_signature(path, 384, "7e0c6d7278a3bb8e364e0fcba95afaf3666cf5ff3c245a3b63c8833bd0445cc4"));
+#else
+    return check_v2_signature(path, expected_manager_size, expected_manager_hash);
+#endif
 }
