@@ -93,6 +93,7 @@ enum bpf_cmd {
 	BPF_PROG_GET_FD_BY_ID,
 	BPF_MAP_GET_FD_BY_ID,
 	BPF_OBJ_GET_INFO_BY_FD,
+	BPF_PROG_QUERY,
 };
 
 enum bpf_map_type {
@@ -130,6 +131,7 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_LWT_XMIT,
 	BPF_PROG_TYPE_SOCK_OPS,
 	BPF_PROG_TYPE_SK_SKB,
+	BPF_PROG_TYPE_CGROUP_DEVICE,
 };
 
 enum bpf_attach_type {
@@ -139,6 +141,7 @@ enum bpf_attach_type {
 	BPF_CGROUP_SOCK_OPS,
 	BPF_SK_SKB_STREAM_PARSER,
 	BPF_SK_SKB_STREAM_VERDICT,
+	BPF_CGROUP_DEVICE,
 	__MAX_BPF_ATTACH_TYPE
 };
 
@@ -211,6 +214,9 @@ enum bpf_attach_type {
 #define BPF_F_NO_COMMON_LRU	(1U << 1)
 /* Specify numa node during map creation */
 #define BPF_F_NUMA_NODE		(1U << 2)
+
+/* flags for BPF_PROG_QUERY */
+#define BPF_F_QUERY_EFFECTIVE	(1U << 0)
 
 /* Flags for accessing BPF object */
 #define BPF_F_RDONLY		(1U << 3)
@@ -292,6 +298,15 @@ union bpf_attr {
 		__u32		info_len;
 		__aligned_u64	info;
 	} info;
+
+	struct { /* anonymous struct used by BPF_PROG_QUERY command */
+		__u32		target_fd;	/* container object to query */
+		__u32		attach_type;
+		__u32		query_flags;
+		__u32		attach_flags;
+		__aligned_u64	prog_ids;
+		__u32		prog_cnt;
+	} query;
 } __attribute__((aligned(8)));
 
 /* BPF helper function descriptions:
@@ -978,4 +993,16 @@ enum {
 #define TCP_BPF_IW		1001	/* Set TCP initial congestion window */
 #define TCP_BPF_SNDCWND_CLAMP	1002	/* Set sndcwnd_clamp */
 
+#define BPF_DEVCG_ACC_MKNOD	(1ULL << 0)
+#define BPF_DEVCG_ACC_READ	(1ULL << 1)
+#define BPF_DEVCG_ACC_WRITE	(1ULL << 2)
+
+#define BPF_DEVCG_DEV_BLOCK	(1ULL << 0)
+#define BPF_DEVCG_DEV_CHAR	(1ULL << 1)
+
+struct bpf_cgroup_dev_ctx {
+	__u32 access_type; /* (access << 16) | type */
+	__u32 major;
+	__u32 minor;
+};
 #endif /* _UAPI__LINUX_BPF_H__ */
