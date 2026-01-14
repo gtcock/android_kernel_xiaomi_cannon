@@ -14,7 +14,10 @@ struct bpf_sock_ops_kern;
 
 extern struct static_key_false cgroup_bpf_enabled_key;
 #define cgroup_bpf_enabled static_branch_unlikely(&cgroup_bpf_enabled_key)
-
+extern int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
+		       union bpf_attr __user *uattr);
+extern const struct bpf_prog_ops cg_dev_prog_ops;
+extern const struct bpf_verifier_ops cg_dev_verifier_ops;			   
 struct bpf_prog_list {
 	struct list_head node;
 	struct bpf_prog *prog;
