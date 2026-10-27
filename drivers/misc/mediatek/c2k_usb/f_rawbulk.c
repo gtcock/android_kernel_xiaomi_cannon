@@ -1,3 +1,4 @@
+#pragma clang diagnostic ignored "-Wsingle-bit-bitfield-constant-conversion"
 /*
  * Copyright (C) 2017 MediaTek Inc.
  *
