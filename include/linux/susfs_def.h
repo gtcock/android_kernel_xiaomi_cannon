@@ -26,7 +26,7 @@
 #define CMD_SUSFS_SUS_SU 0x60000
 
 #define SUSFS_MAX_LEN_PATHNAME 256 // 256 should address many paths already unless you are doing some strange experimental stuff, then set your own desired length
-#define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE 4096
+#define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE 8192
 
 #define TRY_UMOUNT_DEFAULT 0 /* used by susfs_try_umount() */
 #define TRY_UMOUNT_DETACH 1 /* used by susfs_try_umount() */

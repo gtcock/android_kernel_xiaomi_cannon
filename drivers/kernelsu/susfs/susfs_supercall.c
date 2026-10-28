@@ -36,6 +36,9 @@ static const char susfs_feature_list[] =
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	"CONFIG_KSU_SUSFS_SPOOF_UNAME\n"
 #endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	"CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n"
+#endif
 	;
 
 static void susfs_show_version(void __user **arg)
@@ -132,6 +135,27 @@ static void susfs_set_uname_cmd(void __user **arg)
 }
 #endif
 
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+extern int susfs_set_cmdline_or_bootconfig(char __user *buf);
+
+static void susfs_set_cmdline_cmd(void __user **arg)
+{
+	struct st_susfs_spoof_cmdline_or_bootconfig __user *uinfo =
+		(struct st_susfs_spoof_cmdline_or_bootconfig __user *)*arg;
+	int err;
+
+	BUILD_BUG_ON(sizeof(struct st_susfs_spoof_cmdline_or_bootconfig) != 8196);
+	BUILD_BUG_ON(offsetof(struct st_susfs_spoof_cmdline_or_bootconfig, err) != 8192);
+
+	/* 直接让内核侧从用户缓冲区 strncpy_from_user，不用先把 8K 搬进内核 */
+	err = susfs_set_cmdline_or_bootconfig((char __user *)uinfo->fake_cmdline_or_bootconfig);
+	if (err > 0)
+		err = -EINVAL;
+	if (put_user(err, &uinfo->err))
+		pr_warn("susfs: set_cmdline put_user failed\n");
+}
+#endif
+
 int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -171,6 +195,11 @@ int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	case CMD_SUSFS_SET_UNAME:
 		susfs_set_uname_cmd(arg);
+		return 0;
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	case CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG:
+		susfs_set_cmdline_cmd(arg);
 		return 0;
 #endif
 	default:

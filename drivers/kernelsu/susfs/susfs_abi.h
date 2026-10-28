@@ -19,6 +19,7 @@
 #define CMD_SUSFS_UPDATE_SUS_KSTAT		0x55571
 #define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY	0x55572
 #define CMD_SUSFS_SET_UNAME			0x55590
+#define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG	0x555b0
 #define CMD_SUSFS_SHOW_VERSION			0x555e1
 #define CMD_SUSFS_SHOW_ENABLED_FEATURES		0x555e2
 #define CMD_SUSFS_SHOW_VARIANT			0x555e3
@@ -27,6 +28,7 @@
 #define SUSFS_MAX_VERSION_BUFSIZE		16
 #define SUSFS_MAX_VARIANT_BUFSIZE		16
 #define SUSFS_ENABLED_FEATURES_SIZE		8192
+#define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE	8192
 
 /* 与 fs/susfs.c 的 include/linux/susfs.h 同名结构布局必须一致 */
 struct st_susfs_sus_path {
@@ -77,6 +79,12 @@ struct st_susfs_sus_kstat {
 	long long spoofed_blocks;
 	long spoofed_blksize;
 	int flags;
+	int err;
+};
+
+/* 内核侧 susfs_set_cmdline_or_bootconfig() 只吃裸字符串指针，不认结构体 */
+struct st_susfs_spoof_cmdline_or_bootconfig {
+	char fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
 	int err;
 };
 
