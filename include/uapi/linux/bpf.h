@@ -113,6 +113,11 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_HASH_OF_MAPS,
 	BPF_MAP_TYPE_DEVMAP,
 	BPF_MAP_TYPE_SOCKMAP,
+	/* 16..24 是上游后续新增的类型，本内核未实现；显式跳到 25 保证
+	 * 与用户态（AOSP bpf.h）的编号一致。bpf_map_types[] 是稀疏数组，
+	 * 空缺项为 NULL，find_and_alloc_map() 会返回 -EINVAL。
+	 */
+	BPF_MAP_TYPE_DEVMAP_HASH = 25,
 };
 
 enum bpf_prog_type {
