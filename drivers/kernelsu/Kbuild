@@ -1,7 +1,7 @@
-# cannon: 驱动 vendor 进内核树没有 .git，钉死上游 3ab98d0d 的真实版本号
-#   KSU_VERSION = 30000 + <提交数 3020> + 289 = 33309
-#   UAPI = 5，对应管理器 v3.4.2
-KSU_VERSION_OVERRIDE := 33309
+# cannon: 驱动 vendor 进内核树没有 .git，钉死上游 d51ca52c 的真实版本号
+#   KSU_VERSION = 30000 + <提交数 3025> + 289 = 33314
+#   UAPI = 5，对应官方管理器 v3.4.2（33355）
+KSU_VERSION_OVERRIDE := 33314
 KSU_VERSION_TAG_OVERRIDE := v3.4.2
 
 kernelsu-objs := core/init.o
@@ -10,6 +10,7 @@ kernelsu-objs += compat/kernel_compat.o
 kernelsu-objs += feature/kernel_umount.o
 kernelsu-objs += feature/sulog.o
 kernelsu-objs += feature/sucompat.o
+kernelsu-objs += feature/shell_su_adb_only.o
 
 kernelsu-objs += hook/hook_manager.o
 kernelsu-objs += hook/lsm_hooks.o
