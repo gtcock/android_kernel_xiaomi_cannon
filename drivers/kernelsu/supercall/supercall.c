@@ -1,3 +1,4 @@
+#include <linux/atomic.h>
 #include <linux/anon_inodes.h>
 #include <linux/err.h>
 #include <linux/fdtable.h>
@@ -18,6 +19,7 @@
 #include "util.h"
 #include "klog.h" // IWYU pragma: keep
 #include "manager/manager_identity.h"
+#include "manager/throne_tracker.h"
 #include "compat/kernel_compat.h"
 
 #include "sulog/event.h"
@@ -106,10 +108,27 @@ bool ksu_is_su_session_fd(const struct file *filp)
     return context && (context->permissions & KSU_DRIVER_PERMISSION_SU_SESSION);
 }
 
+/*
+ * cannon: 冷启动死锁。
+ * ksu_manager_appid 只能由 track_throne(false) 认出来，而它的触发点
+ * （包安装事件 / ksud 上报事件）都要先拿到驱动 fd；而 fd 的发放又要
+ * allowed_for_su() -> is_manager() -> appid 有效。全新安装时 appid 恒为 -1，
+ * 于是谁都拿不到 fd，管理器永远显示「不支持 | 未集成」。
+ * 这里在返回用户态（进程上下文，可睡眠）先补扫一次再发 fd，
+ * 保证管理器拿到 fd 的那一刻已经被 crown。
+ */
+static atomic_t ksu_bootstrap_scan_done = ATOMIC_INIT(0);
+
 static void ksu_install_fd_tw_func(struct callback_head *cb)
 {
     struct ksu_install_fd_tw *tw = container_of(cb, struct ksu_install_fd_tw, cb);
-    int fd = ksu_install_fd();
+    int fd;
+
+    if (!ksu_is_manager_appid_valid() &&
+        atomic_xchg(&ksu_bootstrap_scan_done, 1) == 0)
+        track_throne(false);
+
+    fd = ksu_install_fd();
 
     pr_info("[%d] install ksu fd: %d\n", current->pid, fd);
     if (copy_to_user(tw->outp, &fd, sizeof(fd))) {
@@ -142,7 +161,13 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 		 * the always_allow GET_INFO / CHECK_SAFEMODE ioctls).
 		 * Restrict to root, manager, and apps allowed for su.
 		 */
-		if (current_uid().val != 0 && !allowed_for_su())
+		/*
+		 * cannon: 原逻辑在 appid 尚未认出来时也拦截，造成冷启动死锁
+		 * （见 ksu_install_fd_tw_func 注释）。改为仅在已经有管理器之后
+		 * 才限制，bootstrap 阶段放行并由 task_work 补扫。
+		 */
+		if (current_uid().val != 0 && !allowed_for_su() &&
+		    ksu_is_manager_appid_valid())
 			return 0;
 
 		tw = kzalloc(sizeof(*tw), GFP_ATOMIC);
