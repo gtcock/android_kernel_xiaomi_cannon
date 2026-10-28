@@ -33,6 +33,9 @@ static const char susfs_feature_list[] =
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	"CONFIG_KSU_SUSFS_SUS_MOUNT\n"
 #endif
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+	"CONFIG_KSU_SUSFS_ENABLE_LOG\n"
+#endif
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	"CONFIG_KSU_SUSFS_SPOOF_UNAME\n"
 #endif
@@ -116,6 +119,27 @@ extern int susfs_add_sus_path(void __user *user_info);
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern int susfs_add_sus_kstat(void __user *user_info, int is_statically);
+#endif
+
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+extern void susfs_set_log(bool enabled);
+
+static void susfs_set_log_cmd(void __user **arg)
+{
+	struct st_susfs_log info;
+	int err = 0;
+
+	BUILD_BUG_ON(sizeof(struct st_susfs_log) != 8);
+	BUILD_BUG_ON(offsetof(struct st_susfs_log, err) != 4);
+
+	if (copy_from_user(&info, (void __user *)*arg, sizeof(info)))
+		err = -EFAULT;
+	else
+		susfs_set_log(!!info.enabled);
+
+	if (put_user(err, &((struct st_susfs_log __user *)*arg)->err))
+		pr_warn("susfs: set_log put_user failed\n");
+}
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
@@ -233,6 +257,11 @@ int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 	case CMD_SUSFS_UPDATE_SUS_KSTAT:
 		/* 我们的实现每次都按路径重解析 ino，UPDATE 与 ADD 等价 */
 		susfs_add_sus_kstat((void __user *)*arg, 0);
+		return 0;
+#endif
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+	case CMD_SUSFS_ENABLE_LOG:
+		susfs_set_log_cmd(arg);
 		return 0;
 #endif
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME

@@ -19,6 +19,7 @@
 #define CMD_SUSFS_UPDATE_SUS_KSTAT		0x55571
 #define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY	0x55572
 #define CMD_SUSFS_SET_UNAME			0x55590
+#define CMD_SUSFS_ENABLE_LOG			0x555a0
 #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG	0x555b0
 #define CMD_SUSFS_ADD_OPEN_REDIRECT		0x555c0
 #define CMD_SUSFS_SHOW_VERSION			0x555e1
@@ -101,6 +102,12 @@ struct st_susfs_open_redirect {
 	char target_pathname[SUSFS_MAX_LEN_PATHNAME];
 	char redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
 	int uid_scheme;
+	int err;
+};
+
+/* bool 在 64 位内核里也是 1 字节，后面 3 字节对齐填充，err 在偏移 4 */
+struct st_susfs_log {
+	bool enabled;
 	int err;
 };
 
