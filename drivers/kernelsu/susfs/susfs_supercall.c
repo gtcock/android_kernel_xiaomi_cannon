@@ -30,6 +30,9 @@ static const char susfs_feature_list[] =
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	"CONFIG_KSU_SUSFS_SUS_KSTAT\n"
 #endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	"CONFIG_KSU_SUSFS_SUS_MOUNT\n"
+#endif
 	;
 
 static void susfs_show_version(void __user **arg)

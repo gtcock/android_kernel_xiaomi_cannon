@@ -90,6 +90,14 @@ config KSU_SUSFS_SUS_PATH
 	  Hide registered paths from non-root app processes: the entry
 	  disappears from getdents64 and lookups return -ENOENT.
 
+config KSU_SUSFS_SUS_MOUNT
+	bool "SUSFS: hide mounts (sus_mount)"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Give mounts created from the KSU domain a private mnt_id range and
+	  drop them from /proc/*/mounts, /proc/*/mountinfo and /proc/*/mountstats.
+
 config KSU_SUSFS_SUS_KSTAT
 	bool "SUSFS: fake file attributes (sus_kstat)"
 	depends on KSU_SUSFS

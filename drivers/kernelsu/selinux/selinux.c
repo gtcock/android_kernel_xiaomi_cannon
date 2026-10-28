@@ -260,6 +260,23 @@ bool is_zygote(const struct cred *cred)
     return is_sid_match(cred, cached_zygote_sid, ZYGOTE_CONTEXT);
 }
 
+#ifdef CONFIG_KSU_SUSFS
+/*
+ * cannon: fs/namespace.c 的 sus_mount 逻辑要判断「当前进程是不是 KSU / zygote 域」，
+ * 上游 next-susfs 是在自己的 selinux.c 里维护一份 SID 缓存，这里直接复用
+ * 本驱动已有的 cached_su_sid / cached_zygote_sid。
+ */
+bool susfs_is_current_ksu_domain(void)
+{
+    return is_ksu_domain();
+}
+
+bool susfs_is_current_zygote_domain(void)
+{
+    return is_zygote(current_cred());
+}
+#endif
+
 bool is_adbd(const struct cred *cred)
 {
     return is_sid_match(cred, cached_adbd_sid, ADBD_CONTEXT);
