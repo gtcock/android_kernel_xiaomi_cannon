@@ -6,7 +6,6 @@
 #include <linux/sched.h>
 #include <linux/workqueue.h>
 
-#include "preinit/preinit.h"
 #include "policy/allowlist.h"
 #include "policy/app_profile.h"
 #include "policy/feature.h"
@@ -22,7 +21,6 @@
 #include "infra/file_wrapper.h"
 #include "selinux/selinux.h"
 #include "feature/selinux_hide.h"
-#include "feature/shell_su_adb_only.h"
 #include "feature/adb_root.h"
 
 extern void __init ksu_lsm_hook_init(void);
@@ -140,10 +138,6 @@ int __init kernelsu_init(void)
 
 	ksu_adb_root_init();
 
-	ksu_shell_su_adb_only_init();
-
-	ksu_feature_apply_forced();
-
 	ksu_lsm_hook_init();
 
 	ksu_selinux_hide_init();
@@ -190,8 +184,6 @@ int __init kernelsu_init(void)
 
 		ksu_ksud_init();
 
-		ksu_preinit_init();
-
 		ksu_file_wrapper_init();
 	}
 
@@ -210,10 +202,8 @@ void __exit kernelsu_exit(void)
 
 	ksu_supercalls_exit();
 
-	if (!ksu_late_loaded) {
+	if (!ksu_late_loaded)
 		ksu_ksud_exit();
-		ksu_preinit_exit();
-	}
 
 	// Wait for any in-flight RCU readers (e.g. handler traversing allow_list)
 	synchronize_rcu();
@@ -230,8 +220,6 @@ void __exit kernelsu_exit(void)
 	ksu_sulog_exit();
 
 	ksu_adb_root_exit();
-
-	ksu_shell_su_adb_only_exit();
 
 	ksu_feature_exit();
 

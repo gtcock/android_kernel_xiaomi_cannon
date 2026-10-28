@@ -1,5 +1,4 @@
 #include "util.h"
-#include "compat/kernel_compat.h"
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/gfp.h>
@@ -189,13 +188,9 @@ static __always_inline bool check_v2_signature(char *path,
 			pr_err("error: cannot allocate memory for eocd\n");
 			goto clean;
 		}
-		memset(eocd_buffer, 0, search_size);
 
 		pos = file_size - search_size;
-		if (kernel_read(fp, eocd_buffer, search_size, &pos) != search_size) {
-			kvfree(eocd_buffer);
-			goto clean;
-		}
+		kernel_read(fp, eocd_buffer, search_size, &pos);
 
 		if (search_size >= eocd_min_size) {
 			long j;

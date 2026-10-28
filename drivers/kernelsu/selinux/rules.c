@@ -58,24 +58,16 @@ extern int avc_ss_reset(struct selinux_avc *avc, u32 seqno);
 // reset avc cache table, otherwise the new rules will not take effect if already denied
 static void reset_avc_cache()
 {
-	#if defined(KSU_COMPAT_USE_SELINUX_STATE)
-	u32 seqno = selinux_state.ss ? ++selinux_state.ss->latest_granting : 1;
-	#else
-	/* 4.9: no selinux_state; use a monotonic local seqno for AVC/policyload notifications */
-	static u32 ksu_avc_seqno = 1;
-	u32 seqno = ++ksu_avc_seqno;
-	#endif
-
 #if ((!defined(KSU_COMPAT_USE_SELINUX_STATE)) || \
 	LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
-    avc_ss_reset(seqno);
-    selnl_notify_policyload(seqno);
-    selinux_status_update_policyload(seqno);
+    avc_ss_reset(0);
+    selnl_notify_policyload(0);
+    selinux_status_update_policyload(0);
 #else
     struct selinux_avc *avc = selinux_state.avc;
-    avc_ss_reset(avc, seqno);
-    selnl_notify_policyload(seqno);
-    selinux_status_update_policyload(&selinux_state, seqno);
+    avc_ss_reset(avc, 0);
+    selnl_notify_policyload(0);
+    selinux_status_update_policyload(&selinux_state, 0);
 #endif
     selinux_xfrm_notify_policyload();
 }
@@ -236,37 +228,60 @@ out_unlock:
 	mutex_unlock(&selinux_state.policy_mutex);
 #else
 
+	cpumask_t old_mask;
 	db = get_policydb();
 	rwlock_t *lock = ksu_get_policy_rwlock();
-
+	
 	if (!lock)
 		goto do_stop_machine;
 
 	/*
-	 * write_lock() already disables preemption; keep it disabled for the
-	 * whole run. Readers take policy_rwlock with preemption off, so a single
-	 * preemption or sleep while the write side is held deadlocks every CPU
-	 * that reaches security_compute_av() (6-way soft lockup + RCU stall).
-	 * Nothing below may sleep - allocations must be GFP_ATOMIC.
+	 * HACK: write_lock() is held with preempt enabled. DO NOT let the
+	 * task be migrated to any other CPU than the current CPU. And since
+	 * set_cpus_allowed_ptr() can sleep, use raw_smp_processor_id() to get
+	 * current CPU and bypass preemption checks.
 	 */
+	cpumask_copy(&old_mask, ksu_get_current_cpumask_t());
+	set_cpus_allowed_ptr(current, cpumask_of(raw_smp_processor_id()));
+
 	write_lock(lock);
+	preempt_enable();
+
+    // we do this dance since both kernel and userspace can trigger this
+	if (likely(current && current->mm))
+		goto has_current_mm;
 
 	apply_kernelsu_rules_fn((void *)db);
+	goto out_unlock;
 
+has_current_mm:
+	;
+
+    // HACK: raise priority of this to the heavens
+	int old_policy = current->policy;
+	struct sched_param old_param = { .sched_priority = current->rt_priority };
+	struct sched_param new_param = { .sched_priority = 50 };
+
+	sched_setscheduler_nocheck(current, 1, &new_param); // raise, fifo, 50
+	apply_kernelsu_rules_fn((void *)db);
+	sched_setscheduler_nocheck(current, old_policy, &old_param); // restore
+
+out_unlock:
+	preempt_disable();
 	write_unlock(lock);
-	/*
-	 * ksu_policydb_fixup_len() takes a GFP_KERNEL kvmalloc(), so it must run
-	 * with the write lock released: sleeping while the write side is held is
-	 * exactly what deadlocks readers in security_compute_av().
-	 */
-	ksu_policydb_fixup_len(db, "apply_kernelsu_rules");
-	goto out_reset_avc;
+	set_cpus_allowed_ptr(current, &old_mask);
+	goto out_flush;
 
 do_stop_machine:
 	stop_machine(apply_kernelsu_rules_fn, (void *)db, NULL);
+
+out_flush:
+	// Return value ignored: the policy is published either way. Kept here
+	// rather than inside apply_kernelsu_rules_fn(), because that one runs
+	// as a stop_machine() callback with local IRQs disabled, and the
+	// measurement allocates.
 	ksu_policydb_fixup_len(db, "apply_kernelsu_rules");
 
-out_reset_avc:
 	smp_mb();
 	reset_avc_cache();
 #endif
@@ -704,8 +719,6 @@ static int handle_sepolicy_fn(void *data)
 			success_cmd_count++;
 		}
 
-		ret = 0;
-
 		cmd_index++;
 	}
 
@@ -719,6 +732,7 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 	u8 *payload;
 	int ret = 0;
 	int success_cmd_count = 0;
+	cpumask_t old_mask;
 
 	if (!user_data || !data_len)
 		return -EINVAL;
@@ -749,37 +763,55 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 		goto do_stop_machine;
 
 	/*
-	 * write_lock() already disables preemption; keep it disabled for the
-	 * whole batch. Readers take policy_rwlock with preemption off, so a
-	 * single preemption or sleep while the write side is held deadlocks
-	 * every CPU that reaches security_compute_av() (6-way soft lockup +
-	 * RCU stall). Nothing below may sleep - allocations are GFP_ATOMIC.
+	 * HACK: write_lock() is held with preempt enabled. DO NOT let the
+	 * task be migrated to any other CPU than the current CPU. And since
+	 * set_cpus_allowed_ptr() can sleep, use raw_smp_processor_id() to get
+	 * current CPU and bypass preemption checks.
 	 */
+	cpumask_copy(&old_mask, ksu_get_current_cpumask_t());
+	set_cpus_allowed_ptr(current, cpumask_of(raw_smp_processor_id()));
+
 	write_lock(lock);
+	preempt_enable();
+
+	if (likely(current && current->mm))
+		goto has_current_mm;
 
 	ret = handle_sepolicy_fn((void *)&ctx);
+	goto out_unlock;
 
+has_current_mm:
+	;
+
+	int old_policy = current->policy;
+	struct sched_param old_param = { .sched_priority = current->rt_priority };
+	struct sched_param new_param = { .sched_priority = 50 };
+
+	sched_setscheduler_nocheck(current, 1, &new_param);
+	ret = handle_sepolicy_fn((void *)&ctx);
+	sched_setscheduler_nocheck(current, old_policy, &old_param);
+
+out_unlock:
+	preempt_disable();
 	write_unlock(lock);
-	/* See apply_kernelsu_rules(): fixup_len may sleep, keep it unlocked. */
-	ksu_policydb_fixup_len(get_policydb(), "handle_sepolicy");
+	set_cpus_allowed_ptr(current, &old_mask);
 	goto out_done;
 
 do_stop_machine:
 	ret = stop_machine(handle_sepolicy_fn, (void *)&ctx, NULL);
-	ksu_policydb_fixup_len(get_policydb(), "handle_sepolicy");
 
 out_done:
-	smp_mb();
-	/*
-	 * Always flush. The legacy path applies rules in place with no
-	 * rollback, so a partially failed batch still mutated the policydb and
-	 * a stale AVC cache would keep serving the pre-batch decisions.
-	 */
-	reset_avc_cache();
+	// Return value ignored: the policy is published either way. Outside the
+	// stop_machine() callback for the same reason as in
+	// apply_kernelsu_rules(). get_policydb() is a plain accessor, so call
+	// it here rather than lifting a variable into this branch.
+	ksu_policydb_fixup_len(get_policydb(), "handle_sepolicy");
 
 	if (ret)
 		goto out_free;
 
+	smp_mb();
+	reset_avc_cache();
 	ret = success_cmd_count;
 
 out_free:
