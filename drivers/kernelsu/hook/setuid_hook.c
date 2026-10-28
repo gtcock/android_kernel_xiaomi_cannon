@@ -28,7 +28,7 @@
 #include "feature/kernel_umount.h"
 #include "compat/kernel_compat.h"
 
-static atomic_t ksu_bootstrap_scan_done = ATOMIC_INIT(0);
+static atomic_t ksu_bootstrap_scan_tries = ATOMIC_INIT(0);
 
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
@@ -46,7 +46,8 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
      * 扫完 appid 就绪，紧接着的 is_uid_manager() 判定即可命中。
      */
     if (unlikely(!ksu_is_manager_appid_valid()) && new_uid >= 10000 &&
-        atomic_xchg(&ksu_bootstrap_scan_done, 1) == 0) {
+        atomic_read(&ksu_bootstrap_scan_tries) < 10) {
+        atomic_inc(&ksu_bootstrap_scan_tries);
         track_throne(false);
     }
 

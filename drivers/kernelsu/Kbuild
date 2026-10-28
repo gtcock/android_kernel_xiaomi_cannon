@@ -1,3 +1,10 @@
+# cannon: 按包名认管理器，跳过官方签名哈希校验。
+# 驱动里 throne_tracker.c 有两条路径：
+#   #ifdef KSU_MANAGER_PACKAGE -> strcmp(包名)
+#   #else                       -> is_manager_apk() 比 EXPECTED_MANAGER_HASH
+# 定义下面这行后，签名校验整段被编译掉，官方 APK / 自编自签 APK 都能用。
+KSU_MANAGER_PACKAGE := com.rifsxd.ksunext
+
 # cannon: 驱动 vendor 进内核树没有 .git，钉死上游 d51ca52c 的真实版本号
 #   KSU_VERSION = 30000 + <提交数 3025> + 289 = 33314
 #   UAPI = 5，对应官方管理器 v3.4.2（33355）
