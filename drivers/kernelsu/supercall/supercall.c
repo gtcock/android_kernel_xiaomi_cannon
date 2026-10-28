@@ -23,6 +23,8 @@
 #include "compat/kernel_compat.h"
 
 #include "sulog/event.h"
+#include "susfs/susfs_abi.h"
+#include "susfs/susfs_supercall.h"
 
 uint32_t ksuver_override = 0;
 
@@ -144,6 +146,15 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 {
 	if (magic1 != KSU_INSTALL_MAGIC1)
 		return 0;
+
+	/*
+	 * cannon: SUSFS 新协议。v3.4.2 的 ksud 用
+	 *   reboot(0xDEADBEEF, 0xFAFAFAFA, cmd, &payload)
+	 * 查询 SuSFS 版本/变体/特性。这里直接应答并返回，
+	 * 不要落到下面的 fd 安装分支。
+	 */
+	if ((unsigned int)magic2 == SUSFS_MAGIC)
+		return ksu_susfs_handle_supercall(cmd, arg);
 
 #ifdef CONFIG_KSU_DEBUG
 	pr_info("sys_reboot: intercepted call! magic: 0x%x id: %d\n", magic1,

@@ -53,6 +53,9 @@ kernelsu-objs += supercall/dispatch.o
 kernelsu-objs += supercall/perm.o
 kernelsu-objs += supercall/supercall.o
 
+# cannon: SUSFS 新协议最小实现（SHOW_* 三个查询）
+kernelsu-objs += susfs/susfs_supercall.o
+
 kernelsu-objs += feature/adb_root.o
 kernelsu-objs += feature/selinux_hide.o
 
