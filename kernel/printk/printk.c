@@ -852,16 +852,6 @@ static int check_syslog_permissions(int type, int source)
 	if (source == SYSLOG_FROM_PROC && type != SYSLOG_ACTION_OPEN)
 		goto ok;
 
-	/*
-	 * cannon: 开发期放开 dmesg 读取。
-	 * init 开机会把 kernel.dmesg_restrict 置 1，shell 没有 CAP_SYSLOG，
-	 * adb shell dmesg 直接 EPERM，排查 KernelSU 时拿不到任何内核日志。
-	 * 只放行三个只读动作，清缓冲/改控制台级别仍然要求特权。
-	 */
-	if (type == SYSLOG_ACTION_READ_ALL || type == SYSLOG_ACTION_READ ||
-	    type == SYSLOG_ACTION_SIZE_BUFFER)
-		goto ok;
-
 	if (syslog_action_restricted(type)) {
 		if (capable(CAP_SYSLOG))
 			goto ok;
