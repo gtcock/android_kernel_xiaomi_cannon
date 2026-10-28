@@ -90,6 +90,14 @@ config KSU_SUSFS_SUS_PATH
 	  Hide registered paths from non-root app processes: the entry
 	  disappears from getdents64 and lookups return -ENOENT.
 
+config KSU_SUSFS_SUS_KSTAT
+	bool "SUSFS: fake file attributes (sus_kstat)"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Report spoofed size/timestamps/dev/ino for registered paths to
+	  non-root app processes (stat/statx and /proc/pid/maps).
+
 config KSU_SUSFS_ENABLE_LOG
 	bool "SUSFS: enable logging"
 	depends on KSU_SUSFS

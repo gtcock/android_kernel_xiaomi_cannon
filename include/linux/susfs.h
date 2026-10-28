@@ -55,6 +55,23 @@ struct st_susfs_sus_mount_list {
 
 /* sus_kstat */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+/* flags 位：只覆盖被置位的字段，未置位的保持内核原值。
+ * 全 0 视为「全部覆盖」，兼容不填 flags 的老式调用方。 */
+#define KSTAT_SPOOF_INO           (1 << 0)
+#define KSTAT_SPOOF_DEV           (1 << 1)
+#define KSTAT_SPOOF_NLINK         (1 << 2)
+#define KSTAT_SPOOF_SIZE          (1 << 3)
+#define KSTAT_SPOOF_ATIME_TV_SEC  (1 << 4)
+#define KSTAT_SPOOF_ATIME_TV_NSEC (1 << 5)
+#define KSTAT_SPOOF_MTIME_TV_SEC  (1 << 6)
+#define KSTAT_SPOOF_MTIME_TV_NSEC (1 << 7)
+#define KSTAT_SPOOF_CTIME_TV_SEC  (1 << 8)
+#define KSTAT_SPOOF_CTIME_TV_NSEC (1 << 9)
+#define KSTAT_SPOOF_BLOCKS        (1 << 10)
+#define KSTAT_SPOOF_BLKSIZE       (1 << 11)
+
+/* cannon: 新协议 ABI，布局必须与 drivers/kernelsu/susfs/susfs_abi.h 一致
+ * （sizeof == 376，offsetof(err) == 372）。userspace 不再传 target_ino。 */
 struct st_susfs_sus_kstat {
 	int                     is_statically;
 	unsigned long           target_ino; // the ino after bind mounted or overlayed
@@ -64,13 +81,15 @@ struct st_susfs_sus_kstat {
 	unsigned int            spoofed_nlink;
 	long long               spoofed_size;
 	long                    spoofed_atime_tv_sec;
+	unsigned long           spoofed_atime_tv_nsec;
 	long                    spoofed_mtime_tv_sec;
+	unsigned long           spoofed_mtime_tv_nsec;
 	long                    spoofed_ctime_tv_sec;
-	long                    spoofed_atime_tv_nsec;
-	long                    spoofed_mtime_tv_nsec;
-	long                    spoofed_ctime_tv_nsec;
-	unsigned long           spoofed_blksize;
-	unsigned long long      spoofed_blocks;
+	unsigned long           spoofed_ctime_tv_nsec;
+	long long               spoofed_blocks;
+	long                    spoofed_blksize;
+	int                     flags;
+	int                     err;
 };
 
 struct st_susfs_sus_kstat_hlist {
@@ -145,8 +164,7 @@ void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname);
 
 /* sus_kstat */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-int susfs_add_sus_kstat(struct st_susfs_sus_kstat* __user user_info);
-int susfs_update_sus_kstat(struct st_susfs_sus_kstat* __user user_info);
+int susfs_add_sus_kstat(struct st_susfs_sus_kstat __user *user_info, int is_statically);
 void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);
 #endif
