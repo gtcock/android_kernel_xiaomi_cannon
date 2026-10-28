@@ -20,6 +20,7 @@
 #define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY	0x55572
 #define CMD_SUSFS_SET_UNAME			0x55590
 #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG	0x555b0
+#define CMD_SUSFS_ADD_OPEN_REDIRECT		0x555c0
 #define CMD_SUSFS_SHOW_VERSION			0x555e1
 #define CMD_SUSFS_SHOW_ENABLED_FEATURES		0x555e2
 #define CMD_SUSFS_SHOW_VARIANT			0x555e3
@@ -79,6 +80,27 @@ struct st_susfs_sus_kstat {
 	long long spoofed_blocks;
 	long spoofed_blksize;
 	int flags;
+	int err;
+};
+
+/* 与 include/linux/susfs.h 里的 enum UID_SCHEME 一致 */
+enum UID_SCHEME {
+	UID_NON_APP_PROC = 0,
+	UID_ROOT_PROC_EXCEPT_SU_PROC,
+	UID_NON_SU_PROC,
+	UID_UMOUNTED_APP_PROC,
+	UID_UMOUNTED_PROC,
+};
+
+/*
+ * 注意：内核侧 st_susfs_open_redirect 是 {target_ino, target, redirected}，
+ * 没有 uid_scheme/err，target_ino 由内核按 target_pathname 解析，所以这里
+ * 不能直接把用户指针丢给内核侧函数。
+ */
+struct st_susfs_open_redirect {
+	char target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	char redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int uid_scheme;
 	int err;
 };
 

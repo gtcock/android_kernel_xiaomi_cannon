@@ -116,6 +116,11 @@ config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 	depends on KSU_SUSFS
 	default y
 
+config KSU_SUSFS_OPEN_REDIRECT
+	bool "SUSFS: redirect open() of a path"
+	depends on KSU_SUSFS
+	default y
+
 config KSU_SUSFS_ENABLE_LOG
 	bool "SUSFS: enable logging"
 	depends on KSU_SUSFS

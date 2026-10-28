@@ -39,6 +39,9 @@ static const char susfs_feature_list[] =
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 	"CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n"
 #endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	"CONFIG_KSU_SUSFS_OPEN_REDIRECT\n"
+#endif
 	;
 
 static void susfs_show_version(void __user **arg)
@@ -156,6 +159,46 @@ static void susfs_set_cmdline_cmd(void __user **arg)
 }
 #endif
 
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+extern int susfs_add_open_redirect(const char *target_pathname,
+				   const char *redirected_pathname);
+
+static void susfs_add_open_redirect_cmd(void __user **arg)
+{
+	struct st_susfs_open_redirect info;
+	int err;
+
+	BUILD_BUG_ON(sizeof(struct st_susfs_open_redirect) != 520);
+	BUILD_BUG_ON(offsetof(struct st_susfs_open_redirect, uid_scheme) != 512);
+	BUILD_BUG_ON(offsetof(struct st_susfs_open_redirect, err) != 516);
+
+	if (copy_from_user(&info, (void __user *)*arg, sizeof(info))) {
+		err = -EFAULT;
+		goto out;
+	}
+	/* 内核侧要 strcmp/strncpy，必须先确认 NUL 结尾 */
+	if (info.target_pathname[SUSFS_MAX_LEN_PATHNAME-1] ||
+	    info.redirected_pathname[SUSFS_MAX_LEN_PATHNAME-1]) {
+		err = -EINVAL;
+		goto out;
+	}
+	/*
+	 * 4.14 侧的 hook（fs/namei.c:3838）写死了 current_uid().val < 2000，
+	 * 只等价于 UID_NON_APP_PROC；别的 scheme 直接拒绝，别静默按错的范围生效。
+	 */
+	if (info.uid_scheme != UID_NON_APP_PROC) {
+		err = -EOPNOTSUPP;
+		goto out;
+	}
+	err = susfs_add_open_redirect(info.target_pathname, info.redirected_pathname);
+	if (err)
+		err = -EINVAL;
+out:
+	if (put_user(err, &((struct st_susfs_open_redirect __user *)*arg)->err))
+		pr_warn("susfs: add_open_redirect put_user failed\n");
+}
+#endif
+
 int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -200,6 +243,11 @@ int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 	case CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG:
 		susfs_set_cmdline_cmd(arg);
+		return 0;
+#endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	case CMD_SUSFS_ADD_OPEN_REDIRECT:
+		susfs_add_open_redirect_cmd(arg);
 		return 0;
 #endif
 	default:

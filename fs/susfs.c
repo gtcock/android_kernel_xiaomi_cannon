@@ -739,6 +739,8 @@ static int susfs_update_open_redirect_inode(struct st_susfs_open_redirect_hlist 
 		goto out_path_put_target;
 	}
 
+	new_entry->target_ino = inode_target->i_ino;
+
 	spin_lock(&inode_target->i_lock);
 	inode_target->i_state |= INODE_STATE_OPEN_REDIRECT;
 	spin_unlock(&inode_target->i_lock);
@@ -748,21 +750,19 @@ out_path_put_target:
 	return err;
 }
 
-int susfs_add_open_redirect(struct st_susfs_open_redirect* __user user_info) {
-	struct st_susfs_open_redirect info;
+/*
+ * cannon: 超调用侧已经把 userspace 的 ABI 结构体解析好并校验过 NUL 结尾，
+ * 这里只收两个内核指针，不再 copy_from_user。
+ */
+int susfs_add_open_redirect(const char *target_pathname, const char *redirected_pathname) {
 	struct st_susfs_open_redirect_hlist *new_entry, *tmp_entry;
 	struct hlist_node *tmp_node;
 	int bkt;
 	bool update_hlist = false;
 
-	if (copy_from_user(&info, user_info, sizeof(info))) {
-		SUSFS_LOGE("failed copying from userspace\n");
-		return 1;
-	}
-
 	spin_lock(&susfs_spin_lock);
 	hash_for_each_safe(OPEN_REDIRECT_HLIST, bkt, tmp_node, tmp_entry, node) {
-		if (!strcmp(tmp_entry->target_pathname, info.target_pathname)) {
+		if (!strcmp(tmp_entry->target_pathname, target_pathname)) {
 			hash_del(&tmp_entry->node);
 			kfree(tmp_entry);
 			update_hlist = true;
@@ -771,15 +771,14 @@ int susfs_add_open_redirect(struct st_susfs_open_redirect* __user user_info) {
 	}
 	spin_unlock(&susfs_spin_lock);
 
-	new_entry = kmalloc(sizeof(struct st_susfs_open_redirect_hlist), GFP_KERNEL);
+	new_entry = kzalloc(sizeof(struct st_susfs_open_redirect_hlist), GFP_KERNEL);
 	if (!new_entry) {
 		SUSFS_LOGE("no enough memory\n");
 		return 1;
 	}
 
-	new_entry->target_ino = info.target_ino;
-	strncpy(new_entry->target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME-1);
-	strncpy(new_entry->redirected_pathname, info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME-1);
+	strncpy(new_entry->target_pathname, target_pathname, SUSFS_MAX_LEN_PATHNAME-1);
+	strncpy(new_entry->redirected_pathname, redirected_pathname, SUSFS_MAX_LEN_PATHNAME-1);
 	if (susfs_update_open_redirect_inode(new_entry)) {
 		SUSFS_LOGE("failed adding path '%s' to OPEN_REDIRECT_HLIST\n", new_entry->target_pathname);
 		kfree(new_entry);
@@ -787,7 +786,7 @@ int susfs_add_open_redirect(struct st_susfs_open_redirect* __user user_info) {
 	}
 
 	spin_lock(&susfs_spin_lock);
-	hash_add(OPEN_REDIRECT_HLIST, &new_entry->node, info.target_ino);
+	hash_add(OPEN_REDIRECT_HLIST, &new_entry->node, new_entry->target_ino);
 	if (update_hlist) {
 		SUSFS_LOGI("target_ino: '%lu', target_pathname: '%s', redirected_pathname: '%s', is successfully updated to OPEN_REDIRECT_HLIST\n",
 				new_entry->target_ino, new_entry->target_pathname, new_entry->redirected_pathname);	

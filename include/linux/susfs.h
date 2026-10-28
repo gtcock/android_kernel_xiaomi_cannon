@@ -192,7 +192,7 @@ int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 #endif
 /* open_redirect */
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-int susfs_add_open_redirect(struct st_susfs_open_redirect* __user user_info);
+int susfs_add_open_redirect(const char *target_pathname, const char *redirected_pathname);
 struct filename* susfs_get_redirected_path(unsigned long ino);
 #endif
 /* sus_su */
