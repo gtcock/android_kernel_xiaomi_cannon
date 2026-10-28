@@ -8,6 +8,8 @@
 #ifndef __CANNON_SUSFS_ABI_H
 #define __CANNON_SUSFS_ABI_H
 
+#include <linux/utsname.h>	/* __NEW_UTS_LEN */
+
 #define KSU_INSTALL_MAGIC1_VAL	0xDEADBEEF
 #define SUSFS_MAGIC		0xFAFAFAFA
 
@@ -16,6 +18,7 @@
 #define CMD_SUSFS_ADD_SUS_KSTAT			0x55570
 #define CMD_SUSFS_UPDATE_SUS_KSTAT		0x55571
 #define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY	0x55572
+#define CMD_SUSFS_SET_UNAME			0x55590
 #define CMD_SUSFS_SHOW_VERSION			0x555e1
 #define CMD_SUSFS_SHOW_ENABLED_FEATURES		0x555e2
 #define CMD_SUSFS_SHOW_VARIANT			0x555e3
@@ -28,6 +31,17 @@
 /* 与 fs/susfs.c 的 include/linux/susfs.h 同名结构布局必须一致 */
 struct st_susfs_sus_path {
 	char target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int err;
+};
+
+/*
+ * 内核侧 include/linux/susfs.h 的 st_susfs_uname 是 {release[65], version[65]}，
+ * 这里是它 + err。前 130 字节布局完全一致，所以可以直接把用户指针交给
+ * susfs_set_uname() 让它自己 copy_from_user。
+ */
+struct st_susfs_uname {
+	char release[__NEW_UTS_LEN+1];
+	char version[__NEW_UTS_LEN+1];
 	int err;
 };
 

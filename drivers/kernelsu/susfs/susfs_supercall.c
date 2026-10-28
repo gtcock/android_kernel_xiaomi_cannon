@@ -33,6 +33,9 @@ static const char susfs_feature_list[] =
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	"CONFIG_KSU_SUSFS_SUS_MOUNT\n"
 #endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	"CONFIG_KSU_SUSFS_SPOOF_UNAME\n"
+#endif
 	;
 
 static void susfs_show_version(void __user **arg)
@@ -109,6 +112,26 @@ extern int susfs_add_sus_path(void __user *user_info);
 extern int susfs_add_sus_kstat(void __user *user_info, int is_statically);
 #endif
 
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+extern int susfs_set_uname(void __user *user_info);
+
+static void susfs_set_uname_cmd(void __user **arg)
+{
+	struct st_susfs_uname __user *uinfo = (struct st_susfs_uname __user *)*arg;
+	int err;
+
+	BUILD_BUG_ON(sizeof(struct st_susfs_uname) != 136);
+	BUILD_BUG_ON(offsetof(struct st_susfs_uname, err) != 132);
+
+	/* 内核侧只读前 130 字节（release + version），err 由这里写回 */
+	err = susfs_set_uname((void __user *)*arg);
+	if (err)
+		err = -EINVAL;
+	if (put_user(err, &uinfo->err))
+		pr_warn("susfs: set_uname put_user failed\n");
+}
+#endif
+
 int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -143,6 +166,11 @@ int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 	case CMD_SUSFS_UPDATE_SUS_KSTAT:
 		/* 我们的实现每次都按路径重解析 ino，UPDATE 与 ADD 等价 */
 		susfs_add_sus_kstat((void __user *)*arg, 0);
+		return 0;
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	case CMD_SUSFS_SET_UNAME:
+		susfs_set_uname_cmd(arg);
 		return 0;
 #endif
 	default:
