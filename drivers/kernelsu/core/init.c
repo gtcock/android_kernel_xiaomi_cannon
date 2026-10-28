@@ -1,3 +1,5 @@
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/export.h>
 #include <linux/fs.h>
 #include <linux/kobject.h>
@@ -10,6 +12,7 @@
 #include "policy/app_profile.h"
 #include "policy/feature.h"
 #include "klog.h" // IWYU pragma: keep
+#include "manager/manager_identity.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
 #include "hook/hook_manager.h"
@@ -100,6 +103,38 @@ bool ksu_bundled = false;
 module_param_named(bundled, ksu_bundled, bool, 0);
 #endif
 
+
+/*
+ * cannon: 只读诊断节点。user build 上 shell 读不到 dmesg/kallsyms，
+ * 排查管理器「未集成」时靠 /proc/ksu_diag 拿事实。
+ */
+static int ksu_diag_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "version=%d\n", KERNEL_SU_VERSION);
+	seq_printf(m, "version_tag=%s\n", KERNEL_SU_VERSION_TAG);
+	seq_printf(m, "uapi=%d\n", KERNEL_SU_UAPI_VERSION);
+	seq_printf(m, "manager_appid=%d\n", ksu_get_manager_appid());
+	seq_printf(m, "appid_valid=%d\n", ksu_is_manager_appid_valid());
+	seq_printf(m, "boot_completed=%d\n", ksu_boot_completed);
+	seq_printf(m, "ksud_present=%d\n", ksu_ksud_present);
+	seq_printf(m, "late_loaded=%d\n", ksu_late_loaded);
+	seq_printf(m, "reader_uid=%d\n", current_uid().val);
+	seq_printf(m, "reader_is_manager=%d\n", is_manager());
+	return 0;
+}
+
+static int ksu_diag_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ksu_diag_show, NULL);
+}
+
+static const struct file_operations ksu_diag_fops = {
+	.open = ksu_diag_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 int __init kernelsu_init(void)
 {
 #ifdef KSU_MANAGER_PACKAGE
@@ -188,6 +223,8 @@ int __init kernelsu_init(void)
 		ksu_throne_tracker_init();
 
 		ksu_ksud_init();
+
+	proc_create("ksu_diag", 0444, NULL, &ksu_diag_fops);
 
 		ksu_file_wrapper_init();
 	}

@@ -1,3 +1,4 @@
+#include <linux/atomic.h>
 #include <linux/compiler.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
@@ -20,17 +21,34 @@
 #include "hook/setuid_hook.h"
 #include "klog.h" // IWYU pragma: keep
 #include "manager/manager_identity.h"
+#include "manager/throne_tracker.h"
 #include "infra/seccomp_cache.h"
 #include "supercall/supercall.h"
 #include "hook/hook_manager.h"
 #include "feature/kernel_umount.h"
 #include "compat/kernel_compat.h"
 
+static atomic_t ksu_bootstrap_scan_done = ATOMIC_INIT(0);
+
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
     // we rely on the fact that zygote always call setresuid(3) with same uids
 
     pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
+
+    /*
+     * cannon: 冷启动死锁的关键一环。
+     * 下面 is_uid_manager() 为真才会 disable_seccomp()，管理器进程才有权调
+     * reboot() 装 fd；而 appid 又只能靠 track_throne(false) 认出来。
+     * 首次安装时 appid 恒为 -1，于是管理器一启动就被自己的 seccomp 拦住
+     * （SYS_reboot 被 TRAP），表现为「不支持 | 未集成」。
+     * 这里在第一次出现应用 uid 时补扫一次：/data 此时一定已挂载，
+     * 扫完 appid 就绪，紧接着的 is_uid_manager() 判定即可命中。
+     */
+    if (unlikely(!ksu_is_manager_appid_valid()) && new_uid >= 10000 &&
+        atomic_xchg(&ksu_bootstrap_scan_done, 1) == 0) {
+        track_throne(false);
+    }
 
     if (unlikely(is_uid_manager(new_uid))) {
 
