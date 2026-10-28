@@ -57,6 +57,8 @@ struct bpf_dtab_netdev {
 	struct net_device *dev;
 	struct bpf_dtab *dtab;
 	unsigned int bit;
+	struct hlist_node index_hlist;
+	u32 idx;
 	struct rcu_head rcu;
 };
 
@@ -65,6 +67,12 @@ struct bpf_dtab {
 	struct bpf_dtab_netdev **netdev_map;
 	unsigned long __percpu *flush_needed;
 	struct list_head list;
+
+	/* these are only used for DEVMAP_HASH type maps */
+	struct hlist_head *dev_index_head;
+	spinlock_t index_lock;
+	unsigned int items;
+	u32 n_buckets;
 };
 
 static DEFINE_SPINLOCK(dev_map_lock);
@@ -73,6 +81,25 @@ static LIST_HEAD(dev_map_list);
 static u64 dev_map_bitmap_size(const union bpf_attr *attr)
 {
 	return BITS_TO_LONGS((u64) attr->max_entries) * sizeof(unsigned long);
+}
+
+static struct hlist_head *dev_map_create_hash(unsigned int entries)
+{
+	int i;
+	struct hlist_head *hash;
+
+	hash = kmalloc_array(entries, sizeof(*hash), GFP_KERNEL);
+	if (hash != NULL)
+		for (i = 0; i < entries; i++)
+			INIT_HLIST_HEAD(&hash[i]);
+
+	return hash;
+}
+
+static inline struct hlist_head *dev_map_index_hash(struct bpf_dtab *dtab,
+						    int idx)
+{
+	return &dtab->dev_index_head[idx & (dtab->n_buckets - 1)];
 }
 
 static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
@@ -104,6 +131,15 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 	/* make sure page count doesn't overflow */
 	cost = (u64) dtab->map.max_entries * sizeof(struct bpf_dtab_netdev *);
 	cost += dev_map_bitmap_size(attr) * num_possible_cpus();
+
+	if (attr->map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
+		dtab->n_buckets = roundup_pow_of_two(dtab->map.max_entries);
+
+		if (!dtab->n_buckets) /* Overflow check */
+			goto free_dtab;
+		cost += (u64) sizeof(struct hlist_head) * dtab->n_buckets;
+	}
+
 	if (cost >= U32_MAX - PAGE_SIZE)
 		goto free_dtab;
 
@@ -129,11 +165,21 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 	if (!dtab->netdev_map)
 		goto free_dtab;
 
+	if (attr->map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
+		dtab->dev_index_head = dev_map_create_hash(dtab->n_buckets);
+		if (!dtab->dev_index_head)
+			goto free_map_area;
+
+		spin_lock_init(&dtab->index_lock);
+	}
+
 	spin_lock(&dev_map_lock);
 	list_add_tail_rcu(&dtab->list, &dev_map_list);
 	spin_unlock(&dev_map_lock);
 
 	return &dtab->map;
+free_map_area:
+	bpf_map_area_free(dtab->netdev_map);
 free_dtab:
 	free_percpu(dtab->flush_needed);
 	kfree(dtab);
@@ -174,15 +220,30 @@ static void dev_map_free(struct bpf_map *map)
 			cond_resched();
 	}
 
-	for (i = 0; i < dtab->map.max_entries; i++) {
-		struct bpf_dtab_netdev *dev;
+	if (dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
+		for (i = 0; i < dtab->n_buckets; i++) {
+			struct bpf_dtab_netdev *dev;
+			struct hlist_node *next;
 
-		dev = dtab->netdev_map[i];
-		if (!dev)
-			continue;
+			hlist_for_each_entry_safe(dev, next,
+						  &dtab->dev_index_head[i],
+						  index_hlist) {
+				dev_put(dev->dev);
+				kfree(dev);
+			}
+		}
+		kfree(dtab->dev_index_head);
+	} else {
+		for (i = 0; i < dtab->map.max_entries; i++) {
+			struct bpf_dtab_netdev *dev;
 
-		dev_put(dev->dev);
-		kfree(dev);
+			dev = dtab->netdev_map[i];
+			if (!dev)
+				continue;
+
+			dev_put(dev->dev);
+			kfree(dev);
+		}
 	}
 
 	free_percpu(dtab->flush_needed);
@@ -212,6 +273,12 @@ void __dev_map_insert_ctx(struct bpf_map *map, u32 bit)
 	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
 	unsigned long *bitmap = this_cpu_ptr(dtab->flush_needed);
 
+	/* flush 位图是按下标索引 netdev_map 的，hash map 没有下标语义；
+	 * 本项目里 DEVMAP_HASH 只用于 tc redirect，不走 XDP flush 路径。
+	 */
+	if (map->map_type == BPF_MAP_TYPE_DEVMAP_HASH)
+		return;
+
 	__set_bit(bit, bitmap);
 }
 
@@ -227,6 +294,9 @@ void __dev_map_flush(struct bpf_map *map)
 	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
 	unsigned long *bitmap = this_cpu_ptr(dtab->flush_needed);
 	u32 bit;
+
+	if (map->map_type == BPF_MAP_TYPE_DEVMAP_HASH)
+		return;
 
 	for_each_set_bit(bit, bitmap, map->max_entries) {
 		struct bpf_dtab_netdev *dev = READ_ONCE(dtab->netdev_map[bit]);
@@ -249,10 +319,29 @@ void __dev_map_flush(struct bpf_map *map)
  * update happens in parallel here a dev_put wont happen until after reading the
  * ifindex.
  */
+static struct bpf_dtab_netdev *__dev_map_hash_lookup_elem(struct bpf_map *map,
+							 u32 key)
+{
+	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
+	struct hlist_head *head = dev_map_index_hash(dtab, key);
+	struct bpf_dtab_netdev *dev;
+
+	hlist_for_each_entry_rcu(dev, head, index_hlist)
+		if (dev->idx == key)
+			return dev;
+
+	return NULL;
+}
+
 struct net_device  *__dev_map_lookup_elem(struct bpf_map *map, u32 key)
 {
 	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
 	struct bpf_dtab_netdev *dev;
+
+	if (map->map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
+		dev = __dev_map_hash_lookup_elem(map, key);
+		return dev ? dev->dev : NULL;
+	}
 
 	if (key >= map->max_entries)
 		return NULL;
@@ -362,6 +451,143 @@ static int dev_map_update_elem(struct bpf_map *map, void *key, void *value,
 	return 0;
 }
 
+static int dev_map_hash_get_next_key(struct bpf_map *map, void *key,
+				     void *next_key)
+{
+	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
+	u32 idx, *next = next_key;
+	struct bpf_dtab_netdev *dev, *next_dev;
+	struct hlist_head *head;
+	int i = 0;
+
+	if (!key)
+		goto find_first;
+
+	idx = *(u32 *)key;
+
+	dev = __dev_map_hash_lookup_elem(map, idx);
+	if (!dev)
+		goto find_first;
+
+	next_dev = hlist_entry_safe(rcu_dereference_raw(hlist_next_rcu(&dev->index_hlist)),
+				    struct bpf_dtab_netdev, index_hlist);
+
+	if (next_dev) {
+		*next = next_dev->idx;
+		return 0;
+	}
+
+	i = idx & (dtab->n_buckets - 1);
+	i++;
+
+ find_first:
+	for (; i < dtab->n_buckets; i++) {
+		head = dev_map_index_hash(dtab, i);
+
+		next_dev = hlist_entry_safe(rcu_dereference_raw(hlist_first_rcu(head)),
+					    struct bpf_dtab_netdev,
+					    index_hlist);
+		if (next_dev) {
+			*next = next_dev->idx;
+			return 0;
+		}
+	}
+
+	return -ENOENT;
+}
+
+static void *dev_map_hash_lookup_elem(struct bpf_map *map, void *key)
+{
+	struct bpf_dtab_netdev *dev = __dev_map_hash_lookup_elem(map, *(u32 *)key);
+
+	return dev ? &dev->dev->ifindex : NULL;
+}
+
+static int dev_map_hash_delete_elem(struct bpf_map *map, void *key)
+{
+	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
+	struct bpf_dtab_netdev *old_dev;
+	int k = *(u32 *)key;
+	unsigned long flags;
+	int ret = -ENOENT;
+
+	spin_lock_irqsave(&dtab->index_lock, flags);
+
+	old_dev = __dev_map_hash_lookup_elem(map, k);
+	if (old_dev) {
+		dtab->items--;
+		hlist_del_init_rcu(&old_dev->index_hlist);
+		call_rcu(&old_dev->rcu, __dev_map_entry_free);
+		ret = 0;
+	}
+	spin_unlock_irqrestore(&dtab->index_lock, flags);
+
+	return ret;
+}
+
+static int dev_map_hash_update_elem(struct bpf_map *map, void *key, void *value,
+				    u64 map_flags)
+{
+	struct bpf_dtab *dtab = container_of(map, struct bpf_dtab, map);
+	struct net *net = current->nsproxy->net_ns;
+	struct bpf_dtab_netdev *dev, *old_dev;
+	u32 ifindex = *(u32 *)value;
+	u32 idx = *(u32 *)key;
+	unsigned long flags;
+	int err = -EEXIST;
+
+	if (unlikely(map_flags > BPF_EXIST || !ifindex))
+		return -EINVAL;
+
+	spin_lock_irqsave(&dtab->index_lock, flags);
+
+	old_dev = __dev_map_hash_lookup_elem(map, idx);
+	if (old_dev && (map_flags & BPF_NOEXIST))
+		goto out_err;
+
+	dev = kmalloc_node(sizeof(*dev), GFP_ATOMIC | __GFP_NOWARN,
+			   map->numa_node);
+	if (!dev) {
+		err = -ENOMEM;
+		goto out_err;
+	}
+
+	dev->dev = dev_get_by_index(net, ifindex);
+	if (!dev->dev) {
+		kfree(dev);
+		err = -EINVAL;
+		goto out_err;
+	}
+
+	dev->bit = idx;
+	dev->idx = idx;
+	dev->dtab = dtab;
+
+	if (old_dev) {
+		hlist_del_rcu(&old_dev->index_hlist);
+	} else {
+		if (dtab->items >= dtab->map.max_entries) {
+			spin_unlock_irqrestore(&dtab->index_lock, flags);
+			dev_put(dev->dev);
+			kfree(dev);
+			return -E2BIG;
+		}
+		dtab->items++;
+	}
+
+	hlist_add_head_rcu(&dev->index_hlist, dev_map_index_hash(dtab, idx));
+	spin_unlock_irqrestore(&dtab->index_lock, flags);
+
+	if (old_dev)
+		call_rcu(&old_dev->rcu, __dev_map_entry_free);
+
+	return 0;
+
+out_err:
+	spin_unlock_irqrestore(&dtab->index_lock, flags);
+	return err;
+}
+
 const struct bpf_map_ops dev_map_ops = {
 	.map_alloc = dev_map_alloc,
 	.map_free = dev_map_free,
@@ -370,6 +596,41 @@ const struct bpf_map_ops dev_map_ops = {
 	.map_update_elem = dev_map_update_elem,
 	.map_delete_elem = dev_map_delete_elem,
 };
+
+const struct bpf_map_ops dev_map_hash_ops = {
+	.map_alloc = dev_map_alloc,
+	.map_free = dev_map_free,
+	.map_get_next_key = dev_map_hash_get_next_key,
+	.map_lookup_elem = dev_map_hash_lookup_elem,
+	.map_update_elem = dev_map_hash_update_elem,
+	.map_delete_elem = dev_map_hash_delete_elem,
+};
+
+static void dev_map_hash_remove_netdev(struct bpf_dtab *dtab,
+				      struct net_device *netdev)
+{
+	unsigned long flags;
+	u32 i;
+
+	spin_lock_irqsave(&dtab->index_lock, flags);
+	for (i = 0; i < dtab->n_buckets; i++) {
+		struct bpf_dtab_netdev *dev;
+		struct hlist_head *head;
+		struct hlist_node *next;
+
+		head = dev_map_index_hash(dtab, i);
+
+		hlist_for_each_entry_safe(dev, next, head, index_hlist) {
+			if (netdev != dev->dev)
+				continue;
+
+			dtab->items--;
+			hlist_del_rcu(&dev->index_hlist);
+			call_rcu(&dev->rcu, __dev_map_entry_free);
+		}
+	}
+	spin_unlock_irqrestore(&dtab->index_lock, flags);
+}
 
 static int dev_map_notification(struct notifier_block *notifier,
 				ulong event, void *ptr)
@@ -387,6 +648,11 @@ static int dev_map_notification(struct notifier_block *notifier,
 		 */
 		rcu_read_lock();
 		list_for_each_entry_rcu(dtab, &dev_map_list, list) {
+			if (dtab->map.map_type == BPF_MAP_TYPE_DEVMAP_HASH) {
+				dev_map_hash_remove_netdev(dtab, netdev);
+				continue;
+			}
+
 			for (i = 0; i < dtab->map.max_entries; i++) {
 				struct bpf_dtab_netdev *dev, *odev;
 
