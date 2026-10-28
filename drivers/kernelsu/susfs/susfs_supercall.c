@@ -24,7 +24,10 @@
 #define SUSFS_VARIANT_STR	"Builtin-4.14"
 
 static const char susfs_feature_list[] =
-	"CANNON_SUSFS_BUILTIN_PARTIAL\n";
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	"CONFIG_KSU_SUSFS_SUS_PATH\n"
+#endif
+	;
 
 static void susfs_show_version(void __user **arg)
 {
@@ -87,6 +90,15 @@ out:
 	kfree(info);
 }
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+/*
+ * fs/susfs.c 里的入口。原型在 include/linux/susfs.h，但那个头里也定义了
+ * struct st_susfs_sus_path，和本目录 susfs_abi.h 的同名结构会撞车；
+ * 两处布局一致（char[256] + int err），这里用 void __user * 声明绕开。
+ */
+extern int susfs_add_sus_path(void __user *user_info);
+#endif
+
 int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 {
 	switch (cmd) {
@@ -99,6 +111,13 @@ int ksu_susfs_handle_supercall(unsigned int cmd, void __user **arg)
 	case CMD_SUSFS_SHOW_ENABLED_FEATURES:
 		susfs_show_features(arg);
 		return 0;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	case CMD_SUSFS_ADD_SUS_PATH:
+	case CMD_SUSFS_ADD_SUS_PATH_LOOP:
+		/* err 由 fs/susfs.c 直接写回 userspace */
+		susfs_add_sus_path((void __user *)*arg);
+		return 0;
+#endif
 	default:
 		/* 未实现的命令不写 err，userspace 会保持 ERR_CMD_NOT_SUPPORTED(126) */
 		return 0;

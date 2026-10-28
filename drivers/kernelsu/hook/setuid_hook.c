@@ -27,6 +27,9 @@
 #include "hook/hook_manager.h"
 #include "feature/kernel_umount.h"
 #include "compat/kernel_compat.h"
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs_def.h>
+#endif
 
 static atomic_t ksu_bootstrap_scan_tries = ATOMIC_INIT(0);
 
@@ -85,6 +88,18 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 	} else {
 #ifdef KSU_KPROBES_HOOK
 		ksu_clear_task_tracepoint_flag_if_needed(current);
+#endif
+#ifdef CONFIG_KSU_SUSFS
+        /*
+         * cannon: SUSFS 的「这是普通应用进程」标记。
+         * fs/readdir.c / fs/namei.c / fs/dcache.c 里的 sus_path 隐藏逻辑全都挂在
+         * current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC 上，
+         * 不置位的话对任何进程都不隐藏。zygote fork 之后必然走一次
+         * setresuid，所以在这里标记正好覆盖所有 app 进程，root/su 进程不受影响。
+         */
+        task_lock(current);
+        current->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC;
+        task_unlock(current);
 #endif
     }
 

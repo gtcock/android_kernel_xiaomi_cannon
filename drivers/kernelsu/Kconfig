@@ -72,4 +72,29 @@ config KSU_SYSCALL_TABLE_HOOK
 
 endchoice
 
+
+config KSU_SUSFS
+	bool "SUSFS support"
+	depends on KSU
+	default y
+	help
+	  Enable SUSFS (SU SuperFS) kernel side support.
+	  This is the in-tree 4.14 port driven through the reboot(2)
+	  supercall protocol, not the upstream 5.10+ LKM.
+
+config KSU_SUSFS_SUS_PATH
+	bool "SUSFS: hide paths (sus_path)"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Hide registered paths from non-root app processes: the entry
+	  disappears from getdents64 and lookups return -ENOENT.
+
+config KSU_SUSFS_ENABLE_LOG
+	bool "SUSFS: enable logging"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow susfs log output to be toggled at runtime.
+
 endmenu
